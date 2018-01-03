@@ -1,14 +1,15 @@
 # coding=utf-8
 import argparse
 import collections
-import cookielib
 import datetime
+import functools
 import gzip
+import http.cookiejar
 import json
 import time
-import urllib
-import urllib2
-from StringIO import StringIO
+import urllib.error
+import urllib.parse
+import urllib.request
 
 SCHOOL_NAME = 'IT-Schule Stuttgart'
 # taken from html sourcecode of the page after successful login
@@ -32,9 +33,7 @@ class WebUntis(object):
         :return:
         """
         if response.info().get('Content-Encoding') == 'gzip':
-            buf = StringIO(response.read())
-            f = gzip.GzipFile(fileobj=buf)
-            _data = f.read()
+            _data = str(gzip.decompress(response.read()))
         else:
             _data = response.read()
         return _data
@@ -49,18 +48,18 @@ class WebUntis(object):
         :return:
         """
         from operator import itemgetter
-        comparers = [((itemgetter(col[1:].strip()), -1) if col.startswith('-') else
-                      (itemgetter(col.strip()), 1)) for col in columns]
+        comparers = [((itemgetter(col[1:].strip()), -1) if col.startswith('-') else (itemgetter(col.strip()), 1)) for
+                     col in columns]
 
         def comparer(left, right):
             for fn, mult in comparers:
-                result = cmp(fn(left), fn(right))
+                result = (fn(left) > fn(right)) - (fn(left) < fn(right))
                 if result:
                     return mult * result
             else:
                 return 0
 
-        return sorted(items, cmp=comparer)
+        return sorted(items, key=functools.cmp_to_key(comparer))
 
     @staticmethod
     def parse_schedule(schedule):
@@ -120,8 +119,8 @@ class WebUntis(object):
 
         :return:
         """
-        cj = cookielib.CookieJar()
-        opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
+        cj = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
 
         # Chrome Version 61.0.3163.100 (Official Build) (64-bit)
         opener.addheaders = [
@@ -133,7 +132,7 @@ class WebUntis(object):
             ('Connection', 'keep-alive')
         ]
 
-        urllib2.install_opener(opener)
+        urllib.request.install_opener(opener)
 
     @staticmethod
     def pretty_print(summary):
@@ -143,27 +142,27 @@ class WebUntis(object):
         :param summary:
         :return:
         """
-        for week, lessons in summary.iteritems():
+        for week, lessons in summary.items():
             week_start_timestamp = datetime.datetime.fromtimestamp(float(week))
             week_end_timestamp = week_start_timestamp + datetime.timedelta(days=5)
             week_start = week_start_timestamp.strftime('%d-%m-%Y')
             week_end = week_end_timestamp.strftime('%d-%m-%Y')
-            print "\nUnterricht von: %s - %s" % (week_start, week_end)
+            print("\nUnterricht von: %s - %s" % (week_start, week_end))
             for lesson in lessons:
                 if all(k in lesson for k in ('subject', 'teacher', 'topic')):
-                    print "%s (%s): %s" % (lesson['subject'], lesson['teacher'], lesson['topic'].replace('\n', ', '))
+                    print("%s (%s): %s" % (lesson['subject'], lesson['teacher'], lesson['topic'].replace('\n', ', ')))
 
-    def __init__(self):
+    def __init__(self, username, password):
         """
         initializing function
+
+        :param username:
+        :param password:
         """
         self.prepare_urllib2()
-        self.login()
-        summary = self.extract_schedule()
+        self.login(username, password)
 
-        self.pretty_print(summary)
-
-    def login(self):
+    def login(self, username, password):
         """
         login to webuntis
 
@@ -171,36 +170,36 @@ class WebUntis(object):
         """
         payload = {
             'school': SCHOOL_NAME,
-            'j_username': args.username,
-            'j_password': args.password,
+            'j_username': username,
+            'j_password': password,
             'token': ''
         }
 
-        data = urllib.urlencode(payload)
-        req = urllib2.Request(self.AUTHENTICATION_URL, data)
-        resp = urllib2.urlopen(req)
+        data = urllib.parse.urlencode(payload).encode("utf-8")
+        req = urllib.request.Request(self.AUTHENTICATION_URL, data=data)
+        resp = urllib.request.urlopen(req)
         data = self.handle_response(resp)
 
         if LICENSE_KEY in data:
-            print "login successful"
+            print("login successful")
         else:
-            print "login not successful"
+            print("login not successful")
             exit()
 
-    def extract_schedule(self):
+    def extract_schedule(self, start_date=None, end_date=None):
         """
         extract the schedule from startdate to enddate
 
         :return:
         """
-        if args.startdate:
-            startdate_str = self.parse_date(datetime.datetime.strptime(args.startdate, '%d-%m-%Y'))
+        if start_date:
+            startdate_str = self.parse_date(datetime.datetime.strptime(start_date, '%d-%m-%Y'))
             startdate = datetime.datetime.strptime(startdate_str, '%Y-%m-%d')
         else:
             startdate = datetime.datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
 
-        if args.enddate:
-            dt = datetime.datetime.strptime(args.enddate, '%d-%m-%Y')
+        if end_date:
+            dt = datetime.datetime.strptime(end_date, '%d-%m-%Y')
         else:
             dt = datetime.datetime.today()
         start = datetime.datetime(*dt.timetuple()[:6])
@@ -209,8 +208,8 @@ class WebUntis(object):
         while startdate < start:
             parsed_day = self.parse_date(startdate)
             data_url = self.SCHEDULE_DATA_URL % (CLASS_ID, parsed_day)
-            req = urllib2.Request(data_url)
-            resp = urllib2.urlopen(req)
+            req = urllib.request.Request(data_url)
+            resp = urllib.request.urlopen(req)
             data = self.handle_response(resp)
 
             weekly_schedule = self.parse_schedule(json.loads(data))
@@ -219,8 +218,8 @@ class WebUntis(object):
             for element in weekly_schedule:
                 info_url = self.SCHEDULE_INFO_URL % (element['date'], element['starttime'], element['endtime'],
                                                      CLASS_ID)
-                req = urllib2.Request(info_url)
-                resp = urllib2.urlopen(req)
+                req = urllib.request.Request(info_url)
+                resp = urllib.request.urlopen(req)
                 data = self.handle_response(resp)
                 lesson = self.parse_lesson(json.loads(data))
                 lesson['starttime'] = element['starttime']
@@ -243,7 +242,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-u', '--username', help='its username', required=True)
     parser.add_argument('-p', '--password', help='its password', required=True)
-    parser.add_argument('-s', '--startdate', help='start date in d-m-Y format')
-    parser.add_argument('-e', '--enddate', help='end date in d-m-Y format')
+    parser.add_argument('-s', '--startdate', help='start date in d-m-Y format', default='')
+    parser.add_argument('-e', '--enddate', help='end date in d-m-Y format', default='')
     args = parser.parse_args()
-    WebUntis()
+
+    webuntis = WebUntis(username=args.username, password=args.password)
+    result_summary = webuntis.extract_schedule(start_date=args.startdate, end_date=args.enddate)
+    WebUntis.pretty_print(result_summary)
