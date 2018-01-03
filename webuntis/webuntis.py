@@ -190,6 +190,8 @@ class WebUntis(object):
         """
         extract the schedule from startdate to enddate
 
+        :param start_date:
+        :param end_date:
         :return:
         """
         if start_date:
