@@ -1,15 +1,13 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
+# coding=utf-8
 import collections
+import cookielib
 import datetime
-import functools
 import gzip
-import http.cookiejar
 import json
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
+import urllib
+import urllib2
+from StringIO import StringIO
 
 SCHOOL_NAME = 'IT-Schule Stuttgart'
 # taken from html sourcecode of the page after successful login
@@ -33,7 +31,9 @@ class WebUntis(object):
         :return:
         """
         if response.info().get('Content-Encoding') == 'gzip':
-            _data = str(gzip.decompress(response.read()))
+            buf = StringIO(response.read())
+            f = gzip.GzipFile(fileobj=buf)
+            _data = f.read()
         else:
             _data = response.read()
         return _data
@@ -48,18 +48,18 @@ class WebUntis(object):
         :return:
         """
         from operator import itemgetter
-        comparers = [((itemgetter(col[1:].strip()), -1) if col.startswith('-') else (itemgetter(col.strip()), 1)) for
-                     col in columns]
+        comparers = [((itemgetter(col[1:].strip()), -1) if col.startswith('-') else
+        (itemgetter(col.strip()), 1)) for col in columns]
 
         def comparer(left, right):
             for fn, mult in comparers:
-                result = (fn(left) > fn(right)) - (fn(left) < fn(right))
+                result = cmp(fn(left), fn(right))
                 if result:
                     return mult * result
             else:
                 return 0
 
-        return sorted(items, key=functools.cmp_to_key(comparer))
+        return sorted(items, cmp=comparer)
 
     @staticmethod
     def parse_schedule(schedule):
@@ -119,8 +119,8 @@ class WebUntis(object):
 
         :return:
         """
-        cj = http.cookiejar.CookieJar()
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+        cj = cookielib.CookieJar()
+        opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
 
         # Chrome Version 61.0.3163.100 (Official Build) (64-bit)
         opener.addheaders = [
@@ -132,7 +132,7 @@ class WebUntis(object):
             ('Connection', 'keep-alive')
         ]
 
-        urllib.request.install_opener(opener)
+        urllib2.install_opener(opener)
 
     @staticmethod
     def pretty_print(summary):
@@ -142,7 +142,7 @@ class WebUntis(object):
         :param summary:
         :return:
         """
-        for week, lessons in summary.items():
+        for week, lessons in summary.iteritems():
             week_start_timestamp = datetime.datetime.fromtimestamp(float(week))
             week_end_timestamp = week_start_timestamp + datetime.timedelta(days=5)
             week_start = week_start_timestamp.strftime('%d-%m-%Y')
@@ -175,9 +175,9 @@ class WebUntis(object):
             'token': ''
         }
 
-        data = urllib.parse.urlencode(payload).encode("utf-8")
-        req = urllib.request.Request(self.AUTHENTICATION_URL, data=data)
-        resp = urllib.request.urlopen(req)
+        data = urllib.urlencode(payload)
+        req = urllib2.Request(self.AUTHENTICATION_URL, data)
+        resp = urllib2.urlopen(req)
         data = self.handle_response(resp)
 
         if LICENSE_KEY in data:
@@ -190,6 +190,8 @@ class WebUntis(object):
         """
         extract the schedule from startdate to enddate
 
+        :param start_date:
+        :param end_date:
         :return:
         """
         if start_date:
@@ -208,8 +210,8 @@ class WebUntis(object):
         while startdate < start:
             parsed_day = self.parse_date(startdate)
             data_url = self.SCHEDULE_DATA_URL % (CLASS_ID, parsed_day)
-            req = urllib.request.Request(data_url)
-            resp = urllib.request.urlopen(req)
+            req = urllib2.Request(data_url)
+            resp = urllib2.urlopen(req)
             data = self.handle_response(resp)
 
             weekly_schedule = self.parse_schedule(json.loads(data))
@@ -218,8 +220,8 @@ class WebUntis(object):
             for element in weekly_schedule:
                 info_url = self.SCHEDULE_INFO_URL % (element['date'], element['starttime'], element['endtime'],
                                                      CLASS_ID)
-                req = urllib.request.Request(info_url)
-                resp = urllib.request.urlopen(req)
+                req = urllib2.Request(info_url)
+                resp = urllib2.urlopen(req)
                 data = self.handle_response(resp)
                 lesson = self.parse_lesson(json.loads(data))
                 lesson['starttime'] = element['starttime']
