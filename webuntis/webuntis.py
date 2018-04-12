@@ -1,27 +1,41 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-import collections
 import datetime
 import functools
 import gzip
 import http.cookiejar
 import json
+import os
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-SCHOOL_NAME = 'IT-Schule Stuttgart'
-# taken from html sourcecode of the page after successful login
-CLASS_ID = 281
-LICENSE_KEY = '"licence":{"name":"IT-Schule Stuttgart","name2":"D-70565, Breitwiesenstr. 20-22"}'
+import collections
+
+# I'm using a json file here since a few of the neighbouring class members can't modify the constants in the code
+# but their friends can share them their class code
+settings = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.path.pardir, "settings.json")))
+if 'school_name' not in settings and 'class_id' not in settings:
+    print("The json settings require school_name and class_id keys")
+    exit(-1)
+
+# the school name you have to enter on the login page
+SCHOOL_NAME = settings['school_name']
+# taken from watching the network traffic in the timetable after a successful login
+# you can open the network tab and check for XHR requests like data?elementType=1&elementId=281&date=2018-02-19
+# element id is probably your class id
+CLASS_ID = int(settings['class_id'])
+
+# asserting an empty loginError value as a successful login
+SUCCESSFUL_LOGIN_INDICATOR = 'loginError":""'
 
 
 class WebUntis(object):
     AUTHENTICATION_URL = 'https://mese.webuntis.com/WebUntis/j_spring_security_check'
     SCHEDULE_DATA_URL = 'https://mese.webuntis.com/WebUntis/api/public/timetable/weekly/data?elementType=1&elementId' \
                         '=%s&date=%s&formatId=1'
-    SCHEDULE_INFO_URL = 'https://mese.webuntis.com/WebUntis/api/public/lesson/info?date=%d&starttime=%d&endtime=%d' \
+    SCHEDULE_INFO_URL = 'https://mese.webuntis.com/WebUntis/api/public/period/info?date=%d&starttime=%d&endtime=%d' \
                         '&elemid=%d&elemtype=1&ttFmtId=1 '
 
     @staticmethod
@@ -180,7 +194,7 @@ class WebUntis(object):
         resp = urllib.request.urlopen(req)
         data = self.handle_response(resp)
 
-        if LICENSE_KEY in data:
+        if SUCCESSFUL_LOGIN_INDICATOR in data:
             print("login successful")
         else:
             print("login not successful")
@@ -236,5 +250,5 @@ class WebUntis(object):
             startdate = startdate + datetime.timedelta(weeks=1)
 
         # return sorted summary by timestamp
-        # noinspection PyArgumentList
+        # noinspection PyArgumentList,PyTypeChecker
         return collections.OrderedDict(sorted(summary.items()))
